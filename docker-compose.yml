@@ -1,0 +1,44 @@
+version: '3.2'
+
+services:
+
+  harvester:
+    build: .
+    image: polkascan/harvester
+    restart: unless-stopped
+    entrypoint: /usr/src/start.sh
+    ports:
+      - '9620:9616'
+    environment:
+      - DB_CONNECTION=mysql+pymysql://root:root@mysql:3306/polkascan?charset=utf8mb4
+      - SUBSTRATE_RPC_URL=ws://substrate-node:9944
+#      - SUBSTRATE_RPC_URL=ws://host.docker.internal:9944
+      - NODE_TYPE=archive
+      - SUBSTRATE_SS58_FORMAT=42
+    depends_on:
+      - mysql
+      - substrate-node
+
+  substrate-node:
+    image: arjanz/substrate-node-template:latest
+    volumes:
+      - 'substrate-node:/substrate'
+    ports:
+      - '9944:9944'
+      - '9933:9933'
+    command: --dev --ws-external --rpc-cors=all --rpc-external --rpc-methods=Unsafe --no-telemetry --no-prometheus --pruning=archive
+
+  mysql:
+    image: mysql:latest
+    volumes:
+      - 'mysql-data:/var/lib/mysql'
+    ports:
+      - '33061:3306'
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=polkascan
+
+volumes:
+  substrate-node:
+  mysql-data:
+

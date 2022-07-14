@@ -1,0 +1,12 @@
+alembic~=1.8
+colored~=1.4.3
+cryptography
+dictalchemy~=0.1
+PyMySQL~=1.0.2
+SQLAlchemy~=1.4
+aiohttp~=3.8
+prometheus-client~=0.14
+tenacity~=8.0
+
+scalecodec>=1.0.38,<2
+substrate-interface>=1.2.7,<2
