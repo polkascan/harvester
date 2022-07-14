@@ -209,7 +209,7 @@ class RetrieveBlocks(Job):
         self.log("🔎 [{}]".format('chain_getBlock'), 3)
         block_response = self.harvester.rpc_call('chain_getBlock', [block_hash])
 
-        number_obj = ScaleDecoder.get_decoder_class('Compact<BlockNumber>')
+        number_obj = self.substrate.create_scale_object('Compact<BlockNumber>')
         number_obj.encode(block_number)
 
         block_hash = bytes.fromhex(block_hash[2:])
@@ -231,7 +231,7 @@ class RetrieveBlocks(Job):
         # Store extrinsics
 
         for extrinsic_idx, extrinsic_data in enumerate(block_response['result']['block']['extrinsics']):
-            data_obj = ScaleDecoder.get_decoder_class('HexBytes', data=ScaleBytes(extrinsic_data))
+            data_obj = self.substrate.create_scale_object('HexBytes', data=ScaleBytes(extrinsic_data))
             data_obj.decode()
 
             extrinsic_bytes = bytes.fromhex(data_obj.value[2:])
@@ -280,9 +280,12 @@ class RetrieveBlocks(Job):
 
         self.session.commit()
 
-        max_block_id = (self.session.query(func.max(NodeBlockHeader.block_number)).one()[0] or -1) + 1
+        if self.session.query(func.max(NodeBlockHeader.block_number)).one()[0] is None:
+            max_block_number = 0
+        else:
+            max_block_number = self.session.query(func.max(NodeBlockHeader.block_number)).one()[0] + 1
 
-        gaps = [{'block_from': max_block_id, 'block_to': finalised_block_number}]
+        gaps = [{'block_from': max_block_number, 'block_to': finalised_block_number}]
 
         with GracefulInterruptHandler() as interrupt_handler:
             for row in gaps:
@@ -316,9 +319,10 @@ class RetrieveRuntimeState(Job):
         """
 
         # TODO store in memory
-        max_block_id = self.session.query(func.max(NodeBlockRuntime.block_number)).one()[0] or -1
-
-        current_block_id = max_block_id + 1
+        if self.session.query(func.max(NodeBlockRuntime.block_number)).one()[0] is None:
+            current_block_id = 0
+        else:
+            current_block_id = self.session.query(func.max(NodeBlockRuntime.block_number)).one()[0] + 1
 
         with GracefulInterruptHandler() as interrupt_handler:
             item = self.session.query(NodeBlockHeader.hash, NodeBlockHeader.block_number).filter(
