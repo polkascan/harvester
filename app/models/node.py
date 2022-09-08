@@ -156,13 +156,14 @@ class HarvesterStatus(BaseModel):
 
 class HarvesterStorageCron(BaseModel):
     __tablename__ = 'harvester_storage_cron'
+    id = sa.Column(sa.Integer(), primary_key=True, autoincrement=True)
+    block_number_interval = sa.Column(sa.Integer())
 
-    block_number_interval = sa.Column(sa.Integer(), primary_key=True, index=True)
-
-    storage_module = sa.Column(sa.String(255), primary_key=True, index=True)
-    storage_name = sa.Column(sa.String(255), primary_key=True, index=True)
+    storage_module = sa.Column(sa.String(255))
+    storage_name = sa.Column(sa.String(255))
 
     storage_key = sa.Column(sa.VARBINARY(128))
+    storage_key_prefix = sa.Column(sa.VARBINARY(128))
 
     def __repr__(self):
         return f"<{self.__class__.__name__}(block_number_interval={self.block_number_interval})," \

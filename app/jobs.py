@@ -50,7 +50,8 @@ class Cron(Job):
         )
         if decoded_storage_entry:
             codec_block_storage.data = decoded_storage_entry.value
-            codec_block_storage.scale_type = decoded_storage_entry.type_string
+            codec_block_storage.scale_type = decoded_storage_entry.type_string or \
+                decoded_storage_entry.__class__.__name__
 
             if codec_block_storage.storage_key == self.harvester.event_storage_key:
 
@@ -349,6 +350,12 @@ class RetrieveRuntimeState(Job):
                     NodeBlockHeader.block_number == current_block_id
                 ).first()
 
+    def get_next_storage_key_page(self, prefix: bytes, start_key: bytes, block_hash: str) -> list:
+        response = self.harvester.rpc_call(
+            method="state_getKeysPaged", params=[f'0x{prefix.hex()}', 100, f'0x{start_key.hex()}', block_hash]
+        )
+        return response.get('result') or []
+
     def storage_block_runtime_data(self, block_hash, block_number):
 
         # Store runtime information
@@ -371,36 +378,64 @@ class RetrieveRuntimeState(Job):
 
             if block_number % cron_entry.block_number_interval == 0:
 
-                if cron_entry.storage_key is None:
+                if cron_entry.storage_key is None and cron_entry.storage_key_prefix is None:
 
                     storage_hash = self.substrate.generate_storage_hash(
                         storage_module=cron_entry.storage_module,
                         storage_function=cron_entry.storage_name
                     )
 
-                    cron_entry.storage_key = bytes.fromhex(storage_hash[2:])
+                    storage_hash = bytes.fromhex(storage_hash[2:])
+
+                    storage_function = self.substrate.get_metadata_storage_function(
+                        cron_entry.storage_module, cron_entry.storage_name, block_hash=block_hash_hex
+                    )
+
+                    if 'Plain' in storage_function.type:
+                        cron_entry.storage_key = storage_hash
+                    else:
+                        cron_entry.storage_key_prefix = storage_hash
+
                     cron_entry.save(self.session)
 
-                events_response = self.harvester.rpc_call(
-                    "state_getStorageAt", [f'0x{cron_entry.storage_key.hex()}', block_hash_hex]
-                )
+                storage_keys = []
 
-                if events_response.get('result'):
-                    events_data = bytes.fromhex(events_response.get('result')[2:])
-                else:
-                    events_data = None
+                if cron_entry.storage_key:
+                    storage_keys.append(cron_entry.storage_key)
 
-                storage_item = NodeBlockStorage(
-                    block_hash=block_hash,
-                    storage_key=cron_entry.storage_key,
-                    data=events_data,
-                    block_number=block_number,
-                    storage_module=cron_entry.storage_module,
-                    storage_name=cron_entry.storage_name,
-                    complete=True
-                )
+                elif cron_entry.storage_key_prefix:
 
-                storage_item.save(self.session)
+                    # Retrieve storage keys from RPC
+                    paged_keys = self.get_next_storage_key_page(
+                        cron_entry.storage_key_prefix, cron_entry.storage_key_prefix, block_hash_hex
+                    )
+                    while len(paged_keys) > 0:
+                        storage_keys += [bytes.fromhex(k[2:]) for k in paged_keys]
+                        last_key = bytes.fromhex(paged_keys[-1][2:])
+                        paged_keys = self.get_next_storage_key_page(
+                            cron_entry.storage_key_prefix, last_key, block_hash_hex
+                        )
+
+                for storage_key in storage_keys:
+                    events_response = self.harvester.rpc_call(
+                        "state_getStorageAt", [f'0x{storage_key.hex()}', block_hash_hex]
+                    )
+
+                    if events_response.get('result'):
+                        events_data = bytes.fromhex(events_response.get('result')[2:])
+                    else:
+                        events_data = None
+
+                    storage_item = NodeBlockStorage(
+                        block_hash=block_hash,
+                        storage_key=storage_key,
+                        data=events_data,
+                        block_number=block_number,
+                        storage_module=cron_entry.storage_module,
+                        storage_name=cron_entry.storage_name,
+                        complete=True
+                    )
+                    storage_item.save(self.session)
 
         # Check if runtime exists TODO optimize this
 
@@ -879,6 +914,7 @@ class ScaleDecode(Job):
             decoded_storage_entry = self.db_substrate.query(
                 module=node_storage.storage_module,
                 storage_function=node_storage.storage_name,
+                raw_storage_key=node_storage.storage_key,
                 block_hash=f'0x{node_storage.block_hash.hex()}'
             )
             if decoded_storage_entry:
@@ -960,6 +996,7 @@ class EtlProcess(Job):
             for etl_db in settings.INSTALLED_ETL_DATABASES:
                 self.session.execute(f'CALL {etl_db}.etl_range({start_blocknumber}, {end_blocknumber}, 1)')
                 self.session.commit()
+                self.log('Processed ETL "{}"'.format(etl_db))
 
             record = HarvesterStatus.query(self.session).get('PROCESS_ETL')
             self.log('Finished ETL process at #{}'.format(record.value or 0))
@@ -985,13 +1022,44 @@ class StorageTask(Job):
             else:
                 raise ValueError("Unknown format in block data")
 
+            # Determine storage key(s) according to pallet/storage function
+            if not task.storage_key and not task.storage_key_prefix:
+                block_hash = self.substrate.get_block_hash(block_ids[0])
+                storage_function = self.substrate.get_metadata_storage_function(
+                    task.storage_pallet, task.storage_name, block_hash=block_hash
+                )
+
+                if not storage_function:
+                    task.description = "Error: Storage function not found"
+                    self.log(task.description)
+                    task.complete = True
+                    task.save(self.session)
+                    self.session.commit()
+                    return
+
+
+                storage_hash = self.substrate.generate_storage_hash(
+                    storage_module=task.storage_pallet,
+                    storage_function=task.storage_name
+                )
+                storage_hash = bytes.fromhex(storage_hash[2:])
+
+                if 'Plain' in storage_function.type:
+                    task.storage_key = storage_hash
+                else:
+                    task.storage_key_prefix = storage_hash
+
+                task.save(self.session)
+
             storage_count = 0
 
             for block_id in block_ids:
                 block_hash = self.substrate.get_block_hash(block_id)
 
                 if block_hash:
+
                     storage_keys = []
+
                     if task.storage_key:
                         storage_keys.append(task.storage_key)
                     elif task.storage_key_prefix:
@@ -1057,7 +1125,7 @@ class StorageTask(Job):
 
     def get_next_storage_key_page(self, prefix: bytes, start_key: bytes, block_hash: str) -> list:
         response = self.harvester.rpc_call(
-            method="state_getKeysPaged", params=[f'0x{prefix.hex()}', 1, f'0x{start_key.hex()}', block_hash]
+            method="state_getKeysPaged", params=[f'0x{prefix.hex()}', 100, f'0x{start_key.hex()}', block_hash]
         )
         return response.get('result') or []
 

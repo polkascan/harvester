@@ -15,10 +15,12 @@
 #
 #  You should have received a copy of the GNU General Public License
 #  along with Polkascan. If not, see <http://www.gnu.org/licenses/>.
+import argparse
+
+from tabulate import tabulate
 
 from app import settings as app_settings, __version__, jobs
 
-import argparse
 from datetime import datetime
 import colored
 from colored import stylize
@@ -26,7 +28,7 @@ from colored import stylize
 from app.base import DatabaseSubstrateInterface, Job
 from time import sleep
 from websocket import WebSocketConnectionClosedException, WebSocketBadStatusException
-from prometheus_client import start_http_server, Summary, Counter, Info, Enum, Histogram
+from prometheus_client import start_http_server, Counter, Enum, Histogram
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
@@ -35,7 +37,8 @@ from substrateinterface.exceptions import SubstrateRequestException
 
 from app.exceptions import ShutdownException, BlockDecodeException
 
-from app.models.node import HarvesterStatus, HarvesterStorageCron
+from app.models.node import HarvesterStatus, HarvesterStorageCron, HarvesterStorageTask
+
 
 
 class Harvester:
@@ -94,12 +97,12 @@ class Harvester:
     def init(self):
 
         # Add jobs
-        harvester.add_job('cron', jobs.Cron)
-        harvester.add_job('retrieve_blocks', jobs.RetrieveBlocks)
-        harvester.add_job('retrieve_runtime_state', jobs.RetrieveRuntimeState)
-        harvester.add_job('scale_decode', jobs.ScaleDecode)
-        harvester.add_job('etl_process', jobs.EtlProcess)
-        harvester.add_job('storage_tasks', jobs.StorageTask)
+        self.add_job('cron', jobs.Cron)
+        self.add_job('retrieve_blocks', jobs.RetrieveBlocks)
+        self.add_job('retrieve_runtime_state', jobs.RetrieveRuntimeState)
+        self.add_job('scale_decode', jobs.ScaleDecode)
+        self.add_job('etl_process', jobs.EtlProcess)
+        self.add_job('storage_tasks', jobs.StorageTask)
 
         self.prom_current_job = Enum('current_job', 'Current Job', states=[
             'cron', 'retrieve_blocks', 'retrieve_runtime_state', 'scale_decode', 'etl_process', 'storage_tasks', '-'
@@ -212,7 +215,7 @@ class Harvester:
             record = HarvesterStatus(
                 key='ENABLE_HARVESTER',
                 description='Enable/disable harvester (master switch)',
-                value=1 if self.force_start else 0
+                value=1
             )
             record.save(self.session)
 
@@ -356,8 +359,61 @@ class Harvester:
         except (ShutdownException, KeyboardInterrupt):
             self.log(stylize("🛑 Shutdown finished".ljust(60), colored.bg(235) + colored.fg(246)))
 
+    def list_storage_tasks(self):
+
+        rows = [
+            [item.id, item.storage_pallet, item.storage_name, item.blocks, item.complete]
+            for item in HarvesterStorageTask.query(self.session).all()
+        ]
+        print(tabulate(rows, headers=['Id', 'Pallet', 'Storage name', 'Blocks', 'Complete']))
+
+    def clean_storage_tasks(self):
+        HarvesterStorageTask.query(self.session).filter_by(complete=True).delete()
+        self.session.commit()
+
+    def add_storage_task(self, pallet: str, storage_function: str, blocks: dict, description=None):
+
+        task = HarvesterStorageTask(
+            storage_pallet=pallet,
+            storage_name=storage_function,
+            blocks=blocks,
+            complete=False,
+            description=description
+        )
+        task.save(self.session)
+        self.session.commit()
+
+    def remove_storage_task(self, task_id):
+        cron = HarvesterStorageTask.query(self.session).get(task_id)
+        self.session.delete(cron)
+        self.session.commit()
+
+    def list_storage_cron(self):
+
+        rows = [
+            [item.id, item.block_number_interval, item.storage_module, item.storage_name]
+            for item in HarvesterStorageCron.query(self.session).all()
+        ]
+        print(tabulate(rows, headers=['Id', 'Block interval', 'Pallet', 'Storage name']))
+
+    def add_storage_cron(self, block_interval: int, pallet: str, storage_function: str):
+        cron = HarvesterStorageCron(
+            block_number_interval=block_interval,
+            storage_module=pallet,
+            storage_name=storage_function
+        )
+        cron.save(self.session)
+        self.session.commit()
+
+    def remove_storage_cron(self, cron_id):
+        cron = HarvesterStorageCron.query(self.session).get(cron_id)
+        self.session.delete(cron)
+        self.session.commit()
+
 
 if __name__ == '__main__':
+
+    from app import cli
 
     parser = argparse.ArgumentParser(description='Polkascan harvester V2 application')
     parser.add_argument('--verbose', action='store_true', help='Verbose more')
@@ -382,7 +438,7 @@ if __name__ == '__main__':
 
     node_type = app_settings.NODE_TYPE or args.type
 
-    harvester = Harvester(
+    cli.harvester = Harvester(
         settings=app_settings,
         verbose_level=verbose_level,
         type=args.type,
@@ -391,4 +447,6 @@ if __name__ == '__main__':
         force_start=args.force_start
     )
 
-    harvester.run(args.action)
+    cli.run()
+
+
