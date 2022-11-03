@@ -180,6 +180,25 @@ class CodecMetadata(BaseModel):
         )
 
 
+class CodecEventIndexAccount(BaseModel):
+    __tablename__ = 'codec_event_index_account'
+    __table_args__ = (Index('ix_codec_event_index_name_attr', "pallet", "event_name", "attribute_index"),)
+
+    block_number = sa.Column(sa.Integer(), primary_key=True, nullable=False)
+    event_idx = sa.Column(sa.Integer(), primary_key=True, nullable=False)
+    attribute_index = sa.Column(sa.Integer(), primary_key=True, nullable=False)
+
+    account_id = sa.Column(sa.VARBINARY(33), nullable=False, index=True)
+    pallet = sa.Column(sa.String(255), nullable=False)
+    event_name = sa.Column(sa.String(255), nullable=False)
+
+    attributes = sa.Column(sa.JSON())
+    extrinsic_idx = sa.Column(sa.Integer(), nullable=True)
+
+    sort_value = sa.Column(sa.Integer(), nullable=True, index=True)
+    block_datetime = sa.Column(UTCDateTime(timezone=True), nullable=True, index=True)
+
+
 class Runtime(BaseModel):
     __tablename__ = 'runtime'
 
@@ -268,6 +287,11 @@ class RuntimeEventAttribute(BaseModel):
     event_name = sa.Column(sa.String(255), primary_key=True, index=True)
     event_attribute_idx = sa.Column(sa.Integer(), nullable=False, index=True, primary_key=True)
     scale_type = sa.Column(sa.String(512))
+
+    def __repr__(self):
+        return "<{}(pallet={}, event_name={}, idx={})>".format(
+            self.__class__.__name__, self.pallet, self.event_name, self.event_attribute_idx
+        )
 
 
 class RuntimePallet(BaseModel):

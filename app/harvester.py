@@ -101,11 +101,13 @@ class Harvester:
         self.add_job('retrieve_blocks', jobs.RetrieveBlocks)
         self.add_job('retrieve_runtime_state', jobs.RetrieveRuntimeState)
         self.add_job('scale_decode', jobs.ScaleDecode)
+        self.add_job('event_index', jobs.EventIndex)
         self.add_job('etl_process', jobs.EtlProcess)
         self.add_job('storage_tasks', jobs.StorageTask)
 
         self.prom_current_job = Enum('current_job', 'Current Job', states=[
-            'cron', 'retrieve_blocks', 'retrieve_runtime_state', 'scale_decode', 'etl_process', 'storage_tasks', '-'
+            'cron', 'retrieve_blocks', 'retrieve_runtime_state', 'scale_decode',
+            'event_index', 'etl_process', 'storage_tasks', '-'
         ])
 
         # Check if status records are present
@@ -219,6 +221,12 @@ class Harvester:
             )
             record.save(self.session)
 
+            record = HarvesterStatus(
+                key='EVENT_INDEX_ACCOUNTID_MAX_BLOCKNUMBER',
+                description='Max blocknumber of event index accountid process'
+            )
+            record.save(self.session)
+
             # Add default storage cron records
             record = HarvesterStorageCron(
                 block_number_interval=1,
@@ -328,6 +336,14 @@ class Harvester:
                             self.process_job('scale_decode')
                         else:
                             self.log("⏸  Job 'scale_decode' paused", 1)
+
+                    if action in ['event_index', 'all'] and self.type == 'archive':
+
+                        if getattr(self.settings, 'ENABLE_HARVESTER', 0) and \
+                                getattr(self.settings, 'ENABLE_HARVESTER_DECODER', 0):
+                            self.process_job('event_index')
+                        else:
+                            self.log("⏸  Job 'event_index' paused", 1)
 
                     if action in ['etl', 'all'] and self.type == 'archive':
 

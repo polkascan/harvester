@@ -160,7 +160,14 @@ def upgrade():
                                     `range1000000` = VALUES(`range1000000`),
                                     `complete` = VALUES(`complete`)
                                 ;
-                
+                                
+                                UPDATE
+                                    `codec_event_index_account` ei
+                                SET
+                                    ei.block_datetime = (SELECT bt.datetime  FROM `codec_block_timestamp` bt WHERE ei.block_number = bt.block_number )
+                                WHERE
+                                    `ei`.`block_number` >= @block_start AND	`ei`.`block_number` <= @block_end;
+                                
                                 ### UPDATE STATUS TABLE ###
                                 IF @update_status = 1 THEN
                                         INSERT INTO `harvester_status` (`key`,`description`,`value`)(

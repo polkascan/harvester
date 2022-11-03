@@ -28,7 +28,7 @@ from app.base import Job, GracefulInterruptHandler
 from app.exceptions import ShutdownException
 from app.models.codec import CodecBlockExtrinsic, CodecBlockHeaderDigestLog, CodecBlockStorage, CodecBlockEvent, \
     CodecMetadata, Runtime, RuntimePallet, RuntimeCall, RuntimeCallArgument, RuntimeEvent, RuntimeEventAttribute, \
-    RuntimeStorage, RuntimeConstant, RuntimeErrorMessage, RuntimeType
+    RuntimeStorage, RuntimeConstant, RuntimeErrorMessage, RuntimeType, CodecEventIndexAccount, CodecBlockTimestamp
 from app.models.node import NodeBlockExtrinsic, NodeBlockStorage, HarvesterStatus, NodeBlockHeader, \
     NodeBlockHeaderDigestLog, NodeBlockRuntime, NodeRuntime, NodeMetadata, HarvesterStorageTask
 from scalecodec.base import ScaleDecoder, ScaleBytes
@@ -960,6 +960,104 @@ class ScaleDecode(Job):
 
         codec_block_storage.save(self.session)
         self.session.commit()
+
+
+class EventIndex(Job):
+
+    icon = '🗄️'
+
+    def __init__(self, **kwargs):
+        self.account_event_catalog = {}
+        super().__init__(**kwargs)
+
+    def start(self):
+
+        record = HarvesterStatus.query(self.session).get('EVENT_INDEX_ACCOUNTID_MAX_BLOCKNUMBER')
+
+        if not record:
+            record = HarvesterStatus(
+                key='EVENT_INDEX_ACCOUNTID_MAX_BLOCKNUMBER',
+                description='Max blocknumber of event index accountid process'
+            )
+            record.save(self.session)
+
+        # Determine event range to process
+        min_event_block = (record.value or 0) + 1
+
+        if self.session.query(func.max(NodeBlockHeader.block_number)).one()[0] is None:
+            max_event_block = 0
+        else:
+            max_event_block = (self.session.query(func.max(CodecBlockEvent.block_number)).one()[0] or 0) + 1
+
+        # Yield per 1000
+        max_event_block = min(max_event_block, min_event_block + self.yield_per)
+
+        with GracefulInterruptHandler() as interrupt_handler:
+
+            for current_block_id in range(min_event_block, max_event_block):
+
+                event_catalog = self.get_event_account_catalog(current_block_id)
+
+                index_added_count = 0
+
+                events = CodecBlockEvent.query(self.session).filter(
+                    CodecBlockEvent.block_number == current_block_id
+                )
+
+                for event in events:
+                    event_key = f'{event.event_module}.{event.event_name}'
+                    if event_key in event_catalog:
+                        for attr_idx in event_catalog[event_key]:
+                            account_id = bytes.fromhex(event.data['attributes'][attr_idx][2:])
+                            event_index = CodecEventIndexAccount(
+                                block_number=event.block_number,
+                                event_idx=event.event_idx,
+                                account_id=account_id,
+                                pallet=event.event_module,
+                                event_name=event.event_name,
+                                attribute_index=attr_idx,
+                                attributes=event.data['attributes'],
+                                extrinsic_idx=event.data['extrinsic_idx']
+                            )
+                            event_index.save(self.session)
+                            index_added_count += 1
+
+                record.value = current_block_id
+                record.save(self.session)
+
+                if index_added_count > 0:
+                    self.log(f'Added {index_added_count} event account index records for #{current_block_id}')
+
+                self.session.commit()
+
+                if interrupt_handler.interrupted:
+                    self.log("🛑 Warm shutdown initiated", 1)
+                    raise ShutdownException()
+
+    def get_event_account_catalog(self, block_number):
+        runtime = NodeBlockRuntime.query(self.session).filter_by(block_number=block_number).one()
+        if runtime.spec_version not in self.account_event_catalog:
+
+            account_events = {}
+
+            event_attributes = RuntimeEventAttribute.query(self.session).filter_by(
+                spec_name=runtime.spec_name,
+                spec_version=runtime.spec_version,
+                scale_type='T::AccountId'
+            )
+
+            for event_attribute in event_attributes:
+
+                event_key = f'{event_attribute.pallet}.{event_attribute.event_name}'
+
+                if event_key not in account_events:
+                    account_events[event_key] = []
+
+                account_events[event_key].append(event_attribute.event_attribute_idx)
+
+            self.account_event_catalog[runtime.spec_version] = account_events
+
+        return self.account_event_catalog[runtime.spec_version]
 
 
 class EtlProcess(Job):
