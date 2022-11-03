@@ -193,8 +193,10 @@ class CodecEventIndexAccount(BaseModel):
     event_name = sa.Column(sa.String(255), nullable=False)
 
     attributes = sa.Column(sa.JSON())
-    sort_value = sa.Column(sa.Integer(), nullable=True, index=True)
     extrinsic_idx = sa.Column(sa.Integer(), nullable=True)
+
+    sort_value = sa.Column(sa.Integer(), nullable=True, index=True)
+    block_datetime = sa.Column(UTCDateTime(timezone=True), nullable=True, index=True)
 
 
 class Runtime(BaseModel):
