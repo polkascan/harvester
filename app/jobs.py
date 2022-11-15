@@ -87,7 +87,7 @@ class Cron(Job):
         block_extrinsic = self.db_substrate.runtime_config.create_scale_object(
             "Extrinsic",
             data=ScaleBytes(node_block_extrinsic.length + node_block_extrinsic.data),
-            metadata=self.db_substrate.metadata_decoder
+            metadata=self.db_substrate.metadata
         )
         block_extrinsic.decode()
 
@@ -495,20 +495,20 @@ class RetrieveRuntimeState(Job):
                     )
 
                     # try:
-                    metadata_decoder = self.substrate.runtime_config.create_scale_object(
+                    metadata = self.substrate.runtime_config.create_scale_object(
                         "MetadataVersioned",
                         data=ScaleBytes(node_metadata.data)
                     )
-                    codec_metadata.data = metadata_decoder.decode()
+                    codec_metadata.data = metadata.decode()
                     codec_metadata.complete = True
 
-                    self.substrate.metadata_decoder = metadata_decoder
+                    self.substrate.metadata = metadata
 
                     if self.substrate.implements_scaleinfo():
                         self.substrate.reload_type_registry()
-                        self.substrate.runtime_config.add_portable_registry(metadata_decoder)
+                        self.substrate.runtime_config.add_portable_registry(metadata)
 
-                    self.store_runtime(metadata_decoder, node_runtime, block_hash)
+                    self.store_runtime(metadata, node_runtime, block_hash)
 
                     # except:
                     #     codec_metadata.complete = False
@@ -636,12 +636,17 @@ class RetrieveRuntimeState(Job):
                         else:
                             scale_type = arg.type
 
+                        if arg.value.get('name'):
+                            arg_name = arg.value.get('name')
+                        else:
+                            arg_name = str(arg_index)
+
                         runtime_event_attr = RuntimeEventAttribute(
                             spec_name=runtime_module.spec_name,
                             spec_version=runtime_module.spec_version,
                             pallet=runtime_module.pallet,
                             event_name=event.name,
-                            event_attribute_idx=arg_index,
+                            event_attribute_name=arg_name,
                             scale_type=scale_type
                         )
                         runtime_event_attr.save(self.session)
@@ -854,7 +859,7 @@ class ScaleDecode(Job):
             scale_extrinsic = self.db_substrate.runtime_config.create_scale_object(
                 "Extrinsic",
                 data=ScaleBytes(node_block_extrinsic.length + node_block_extrinsic.data),
-                metadata=self.db_substrate.metadata_decoder
+                metadata=self.db_substrate.metadata
             )
             scale_extrinsic.decode()
 
@@ -888,7 +893,7 @@ class ScaleDecode(Job):
             scale_log_item = self.db_substrate.runtime_config.create_scale_object(
                 type_string='sp_runtime::generic::digest::DigestItem',
                 data=ScaleBytes(node_log_item.data),
-                metadata=self.db_substrate.metadata_decoder
+                metadata=self.db_substrate.metadata
             )
 
             log_item.data = scale_log_item.decode()
@@ -1007,15 +1012,17 @@ class EventIndex(Job):
                 for event in events:
                     event_key = f'{event.event_module}.{event.event_name}'
                     if event_key in event_catalog:
-                        for attr_idx in event_catalog[event_key]:
-                            account_id = bytes.fromhex(event.data['attributes'][attr_idx][2:])
+                        for attr_name in event_catalog[event_key]:
+
+                            account_id = bytes.fromhex(event.data['attributes'][attr_name][2:])
+
                             event_index = CodecEventIndexAccount(
                                 block_number=event.block_number,
                                 event_idx=event.event_idx,
                                 account_id=account_id,
                                 pallet=event.event_module,
                                 event_name=event.event_name,
-                                attribute_index=attr_idx,
+                                attribute_name=attr_name,
                                 attributes=event.data['attributes'],
                                 extrinsic_idx=event.data['extrinsic_idx']
                             )
@@ -1053,7 +1060,7 @@ class EventIndex(Job):
                 if event_key not in account_events:
                     account_events[event_key] = []
 
-                account_events[event_key].append(event_attribute.event_attribute_idx)
+                account_events[event_key].append(event_attribute.event_attribute_name)
 
             self.account_event_catalog[runtime.spec_version] = account_events
 

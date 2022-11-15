@@ -182,11 +182,11 @@ class CodecMetadata(BaseModel):
 
 class CodecEventIndexAccount(BaseModel):
     __tablename__ = 'codec_event_index_account'
-    __table_args__ = (Index('ix_codec_event_index_name_attr', "pallet", "event_name", "attribute_index"),)
+    __table_args__ = (Index('ix_codec_event_index_name_attr', "pallet", "event_name", "attribute_name"),)
 
     block_number = sa.Column(sa.Integer(), primary_key=True, nullable=False)
     event_idx = sa.Column(sa.Integer(), primary_key=True, nullable=False)
-    attribute_index = sa.Column(sa.Integer(), primary_key=True, nullable=False)
+    attribute_name = sa.Column(sa.String(64), primary_key=True, nullable=False)
 
     account_id = sa.Column(sa.VARBINARY(33), nullable=False, index=True)
     pallet = sa.Column(sa.String(255), nullable=False)
@@ -285,7 +285,7 @@ class RuntimeEventAttribute(BaseModel):
     spec_version = sa.Column(sa.Integer(), nullable=False, primary_key=True, index=True)
     pallet = sa.Column(sa.String(255), nullable=False, primary_key=True, index=True)
     event_name = sa.Column(sa.String(255), primary_key=True, index=True)
-    event_attribute_idx = sa.Column(sa.Integer(), nullable=False, index=True, primary_key=True)
+    event_attribute_name = sa.Column(sa.String(64), nullable=False, index=True, primary_key=True)
     scale_type = sa.Column(sa.String(512))
 
     def __repr__(self):
