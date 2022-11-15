@@ -1010,24 +1010,25 @@ class EventIndex(Job):
                 )
 
                 for event in events:
-                    event_key = f'{event.event_module}.{event.event_name}'
-                    if event_key in event_catalog:
-                        for attr_name in event_catalog[event_key]:
+                    if type(event.data['attributes']) is dict:
+                        event_key = f'{event.event_module}.{event.event_name}'
+                        if event_key in event_catalog:
+                            for attr_name in event_catalog[event_key]:
 
-                            account_id = bytes.fromhex(event.data['attributes'][attr_name][2:])
+                                account_id = bytes.fromhex(event.data['attributes'][attr_name][2:])
 
-                            event_index = CodecEventIndexAccount(
-                                block_number=event.block_number,
-                                event_idx=event.event_idx,
-                                account_id=account_id,
-                                pallet=event.event_module,
-                                event_name=event.event_name,
-                                attribute_name=attr_name,
-                                attributes=event.data['attributes'],
-                                extrinsic_idx=event.data['extrinsic_idx']
-                            )
-                            event_index.save(self.session)
-                            index_added_count += 1
+                                event_index = CodecEventIndexAccount(
+                                    block_number=event.block_number,
+                                    event_idx=event.event_idx,
+                                    account_id=account_id,
+                                    pallet=event.event_module,
+                                    event_name=event.event_name,
+                                    attribute_name=attr_name,
+                                    attributes=event.data['attributes'],
+                                    extrinsic_idx=event.data['extrinsic_idx']
+                                )
+                                event_index.save(self.session)
+                                index_added_count += 1
 
                 record.value = current_block_id
                 record.save(self.session)
