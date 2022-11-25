@@ -530,7 +530,9 @@ class RetrieveRuntimeState(Job):
             count_pallets=len(metadata_decoder.pallets),
             count_storage_functions=0,
             count_constants=0,
-            count_errors=0
+            count_errors=0,
+            block_hash=runtime_info.block_hash,
+            block_number=runtime_info.block_number
         )
 
         runtime.save(self.session)
