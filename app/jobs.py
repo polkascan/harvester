@@ -725,7 +725,7 @@ class RetrieveRuntimeState(Job):
                     if type(value) is list or type(value) is dict:
                         value = json.dumps(value)
 
-                    scale_cls = self.substrate.runtime_config.get_decoder_class(arg.type)
+                    scale_cls = self.substrate.runtime_config.get_decoder_class(constant.type)
 
                     runtime_constant = RuntimeConstant(
                         spec_name=runtime_module.spec_name,
