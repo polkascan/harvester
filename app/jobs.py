@@ -28,7 +28,7 @@ from app.base import Job, GracefulInterruptHandler
 from app.exceptions import ShutdownException
 from app.models.codec import CodecBlockExtrinsic, CodecBlockHeaderDigestLog, CodecBlockStorage, CodecBlockEvent, \
     CodecMetadata, Runtime, RuntimePallet, RuntimeCall, RuntimeCallArgument, RuntimeEvent, RuntimeEventAttribute, \
-    RuntimeStorage, RuntimeConstant, RuntimeErrorMessage, RuntimeType, CodecEventIndexAccount, CodecBlockTimestamp
+    RuntimeStorage, RuntimeConstant, RuntimeErrorMessage, CodecEventIndexAccount
 from app.models.node import NodeBlockExtrinsic, NodeBlockStorage, HarvesterStatus, NodeBlockHeader, \
     NodeBlockHeaderDigestLog, NodeBlockRuntime, NodeRuntime, NodeMetadata, HarvesterStorageTask
 from scalecodec.base import ScaleDecoder, ScaleBytes
@@ -601,6 +601,8 @@ class RetrieveRuntimeState(Job):
                         else:
                             scale_type = arg.type
 
+                        scale_cls = self.substrate.runtime_config.get_decoder_class(arg.type)
+
                         runtime_call_arg = RuntimeCallArgument(
                             spec_name=runtime_module.spec_name,
                             spec_version=runtime_module.spec_version,
@@ -608,7 +610,8 @@ class RetrieveRuntimeState(Job):
                             call_name=call.name,
                             call_argument_idx=arg_idx,
                             name=arg.name,
-                            scale_type=scale_type
+                            scale_type=scale_type,
+                            scale_type_composition=scale_cls.generate_type_decomposition(max_recursion=4)
                         )
                         runtime_call_arg.save(self.session)
 
@@ -643,13 +646,16 @@ class RetrieveRuntimeState(Job):
                         else:
                             arg_name = str(arg_index)
 
+                        scale_cls = self.substrate.runtime_config.get_decoder_class(arg.type)
+
                         runtime_event_attr = RuntimeEventAttribute(
                             spec_name=runtime_module.spec_name,
                             spec_version=runtime_module.spec_version,
                             pallet=runtime_module.pallet,
                             event_name=event.name,
                             event_attribute_name=arg_name,
-                            scale_type=scale_type
+                            scale_type=scale_type,
+                            scale_type_composition=scale_cls.generate_type_decomposition(max_recursion=4)
                         )
                         runtime_event_attr.save(self.session)
 
@@ -719,6 +725,8 @@ class RetrieveRuntimeState(Job):
                     if type(value) is list or type(value) is dict:
                         value = json.dumps(value)
 
+                    scale_cls = self.substrate.runtime_config.get_decoder_class(constant.type)
+
                     runtime_constant = RuntimeConstant(
                         spec_name=runtime_module.spec_name,
                         spec_version=runtime_module.spec_version,
@@ -726,6 +734,7 @@ class RetrieveRuntimeState(Job):
                         pallet_constant_idx=idx,
                         constant_name=constant.name,
                         scale_type=constant.type,
+                        scale_type_composition=scale_cls.generate_type_decomposition(max_recursion=4),
                         value=value,
                         documentation='\n'.join(constant.docs)
                     )
@@ -745,18 +754,6 @@ class RetrieveRuntimeState(Job):
                     runtime_error.save(self.session)
 
             runtime.save(self.session)
-
-        # Process types
-        for runtime_type_data in list(self.substrate.get_type_registry(block_hash=f'0x{block_hash.hex()}').values()):
-            runtime_type = RuntimeType(
-                spec_name=runtime_info.spec_name,
-                spec_version=runtime_info.spec_version,
-                scale_type=runtime_type_data["type_string"],
-                decoder_class=runtime_type_data["decoder_class"],
-                is_core_primitive=runtime_type_data["is_primitive_core"],
-                is_runtime_primitive=runtime_type_data["is_primitive_runtime"]
-            )
-            runtime_type.save(self.session)
 
 
 class ScaleDecode(Job):
