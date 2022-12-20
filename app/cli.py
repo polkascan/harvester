@@ -37,7 +37,9 @@ def main():
 @click.option("--force-start", is_flag=True, show_default=True, default=False, help="Forces the harvester to start")
 @click.option('--type', 'type_', type=click.Choice(['archive', 'full', 'light'], case_sensitive=False), default='archive', show_default=True)
 @click.option('--job', type=click.Choice(['blocks', 'state', 'decode', 'cron', 'etl', 'all'], case_sensitive=False), default='all', show_default=True)
-def run(verbose, prometheus, type_, force_start, job):
+@click.option('--block-start', type=int)
+@click.option('--block-end', type=int)
+def run(verbose, prometheus, type_, force_start, job, block_start, block_end):
     if verbose:
         verbose_level = 3
         import logging
@@ -49,6 +51,8 @@ def run(verbose, prometheus, type_, force_start, job):
     harvester.type = type_
     harvester.prometheus_endpoint = prometheus
     harvester.force_start = force_start
+    harvester.block_start = block_start
+    harvester.block_end = block_end
 
     harvester.run(job)
 

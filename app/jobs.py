@@ -286,6 +286,9 @@ class RetrieveBlocks(Job):
         else:
             max_block_number = self.session.query(func.max(NodeBlockHeader.block_number)).one()[0] + 1
 
+        if self.harvester.block_start:
+            max_block_number = max(self.harvester.block_start, max_block_number)
+
         gaps = [{'block_from': max_block_number, 'block_to': finalised_block_number}]
 
         with GracefulInterruptHandler() as interrupt_handler:
@@ -324,6 +327,9 @@ class RetrieveRuntimeState(Job):
             current_block_id = 0
         else:
             current_block_id = self.session.query(func.max(NodeBlockRuntime.block_number)).one()[0] + 1
+
+        if self.harvester.block_start:
+            current_block_id = max(self.harvester.block_start, current_block_id)
 
         with GracefulInterruptHandler() as interrupt_handler:
             item = self.session.query(NodeBlockHeader.hash, NodeBlockHeader.block_number).filter(
@@ -641,7 +647,7 @@ class RetrieveRuntimeState(Job):
                         else:
                             scale_type = arg.type
 
-                        if arg.value.get('name'):
+                        if type(arg.value) is dict and arg.value.get('name'):
                             arg_name = arg.value.get('name')
                         else:
                             arg_name = str(arg_index)
@@ -766,6 +772,9 @@ class ScaleDecode(Job):
 
         max_extrinsic_block_id = (self.session.query(func.max(NodeBlockExtrinsic.block_number)).one()[0] or -1)
 
+        if self.harvester.block_start:
+            min_extrinsic_block_id = max(self.harvester.block_start, min_extrinsic_block_id)
+
         # Yield per 1000
         max_extrinsic_block_id = min(max_extrinsic_block_id, min_extrinsic_block_id + self.yield_per)
 
@@ -793,6 +802,9 @@ class ScaleDecode(Job):
 
         max_log_block_id = (self.session.query(func.max(NodeBlockHeaderDigestLog.block_number)).one()[0] or -1)
 
+        if self.harvester.block_start:
+            min_log_block_id = max(self.harvester.block_start, min_log_block_id)
+
         # Yield per 1000
         max_log_block_id = min(max_log_block_id, min_log_block_id + self.yield_per)
 
@@ -817,6 +829,9 @@ class ScaleDecode(Job):
 
         # Storage
         min_storage_block_id = (self.session.query(func.max(CodecBlockStorage.block_number)).one()[0] or -1) + 1
+
+        if self.harvester.block_start:
+            min_storage_block_id = max(self.harvester.block_start, min_storage_block_id)
 
         max_storage_block_id = (self.session.query(func.max(NodeBlockStorage.block_number)).one()[0] or -1)
 
@@ -988,6 +1003,9 @@ class EventIndex(Job):
         # Determine event range to process
         min_event_block = (record.value or 0) + 1
 
+        if self.harvester.block_start:
+            min_event_block = max(self.harvester.block_start, min_event_block)
+
         if self.session.query(func.max(NodeBlockHeader.block_number)).one()[0] is None:
             max_event_block = 0
         else:
@@ -1085,6 +1103,9 @@ class EtlProcess(Job):
             start_blocknumber = 0
         else:
             start_blocknumber = (start_record.value or -1) + 1
+
+        if self.harvester.block_start:
+            start_blocknumber = max(self.harvester.block_start, start_blocknumber)
 
         end_blocknumber = min(end_record.value or 0, start_blocknumber + 999)
 
