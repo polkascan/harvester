@@ -803,7 +803,7 @@ class ScaleDecode(Job):
         max_log_block_id = (self.session.query(func.max(NodeBlockHeaderDigestLog.block_number)).one()[0] or -1)
 
         if self.harvester.block_start:
-            min_log_block_id = max(self.harvester.block_start, min_log_block_id)
+            min_log_block_id = max(self.harvester.block_start + 1, min_log_block_id)
 
         # Yield per 1000
         max_log_block_id = min(max_log_block_id, min_log_block_id + self.yield_per)
@@ -831,7 +831,7 @@ class ScaleDecode(Job):
         min_storage_block_id = (self.session.query(func.max(CodecBlockStorage.block_number)).one()[0] or -1) + 1
 
         if self.harvester.block_start:
-            min_storage_block_id = max(self.harvester.block_start, min_storage_block_id)
+            min_storage_block_id = max(self.harvester.block_start + 1, min_storage_block_id)
 
         max_storage_block_id = (self.session.query(func.max(NodeBlockStorage.block_number)).one()[0] or -1)
 
