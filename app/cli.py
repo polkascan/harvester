@@ -51,8 +51,12 @@ def run(verbose, prometheus, type_, force_start, job, block_start, block_end):
     harvester.type = type_
     harvester.prometheus_endpoint = prometheus
     harvester.force_start = force_start
-    harvester.block_start = block_start
-    harvester.block_end = block_end
+
+    if block_start:
+        harvester.block_start = block_start
+
+    if block_end:
+        harvester.block_end = block_end
 
     harvester.run(job)
 

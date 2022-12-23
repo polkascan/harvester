@@ -51,7 +51,8 @@ class Harvester:
         self.type = type
         self.cron_delay = cron_delay
         self.prometheus_endpoint = prometheus_endpoint
-
+        self.block_start = self.settings.BLOCK_START
+        self.block_end = self.settings.BLOCK_END
         self.storage_cron_entries = []
 
         if not hasattr(self.settings, 'DB_CONNECTION') or self.settings.DB_CONNECTION is None:

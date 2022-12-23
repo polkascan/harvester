@@ -289,6 +289,9 @@ class RetrieveBlocks(Job):
         if self.harvester.block_start:
             max_block_number = max(self.harvester.block_start, max_block_number)
 
+        if self.harvester.block_end:
+            finalised_block_number = min(self.harvester.block_end, finalised_block_number)
+
         gaps = [{'block_from': max_block_number, 'block_to': finalised_block_number}]
 
         with GracefulInterruptHandler() as interrupt_handler:
