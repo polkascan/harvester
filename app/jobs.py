@@ -528,6 +528,11 @@ class RetrieveRuntimeState(Job):
         # Store metadata in database
         self.log(f'Store runtime {runtime_info.spec_name}-{runtime_info.spec_version}')
 
+        runtime = Runtime.query(self.session).get((runtime_info.spec_name, runtime_info.spec_version))
+
+        if runtime:
+            return
+
         runtime = Runtime(
             spec_name=runtime_info.spec_name,
             spec_version=runtime_info.spec_version,
@@ -612,6 +617,14 @@ class RetrieveRuntimeState(Job):
 
                         scale_cls = self.substrate.runtime_config.get_decoder_class(arg.type)
 
+                        if scale_cls:
+                            try:
+                                scale_type_composition = scale_cls.generate_type_decomposition(max_recursion=4)
+                            except NotImplementedError:
+                                scale_type_composition = None
+                        else:
+                            scale_type_composition = None
+
                         runtime_call_arg = RuntimeCallArgument(
                             spec_name=runtime_module.spec_name,
                             spec_version=runtime_module.spec_version,
@@ -620,7 +633,7 @@ class RetrieveRuntimeState(Job):
                             call_argument_idx=arg_idx,
                             name=arg.name,
                             scale_type=scale_type,
-                            scale_type_composition=scale_cls.generate_type_decomposition(max_recursion=4)
+                            scale_type_composition=scale_type_composition
                         )
                         runtime_call_arg.save(self.session)
 
@@ -657,6 +670,14 @@ class RetrieveRuntimeState(Job):
 
                         scale_cls = self.substrate.runtime_config.get_decoder_class(arg.type)
 
+                        if scale_cls:
+                            try:
+                                scale_type_composition = scale_cls.generate_type_decomposition(max_recursion=4)
+                            except NotImplementedError:
+                                scale_type_composition = None
+                        else:
+                            scale_type_composition = None
+
                         runtime_event_attr = RuntimeEventAttribute(
                             spec_name=runtime_module.spec_name,
                             spec_version=runtime_module.spec_version,
@@ -664,7 +685,7 @@ class RetrieveRuntimeState(Job):
                             event_name=event.name,
                             event_attribute_name=arg_name,
                             scale_type=scale_type,
-                            scale_type_composition=scale_cls.generate_type_decomposition(max_recursion=4)
+                            scale_type_composition=scale_type_composition
                         )
                         runtime_event_attr.save(self.session)
 
@@ -736,6 +757,14 @@ class RetrieveRuntimeState(Job):
 
                     scale_cls = self.substrate.runtime_config.get_decoder_class(constant.type)
 
+                    if scale_cls:
+                        try:
+                            scale_type_composition = scale_cls.generate_type_decomposition(max_recursion=4)
+                        except NotImplementedError:
+                            scale_type_composition = None
+                    else:
+                        scale_type_composition = None
+
                     runtime_constant = RuntimeConstant(
                         spec_name=runtime_module.spec_name,
                         spec_version=runtime_module.spec_version,
@@ -743,7 +772,7 @@ class RetrieveRuntimeState(Job):
                         pallet_constant_idx=idx,
                         constant_name=constant.name,
                         scale_type=constant.type,
-                        scale_type_composition=scale_cls.generate_type_decomposition(max_recursion=4),
+                        scale_type_composition=scale_type_composition,
                         value=value,
                         documentation='\n'.join(constant.docs)
                     )
@@ -778,6 +807,9 @@ class ScaleDecode(Job):
         if self.harvester.block_start:
             min_extrinsic_block_id = max(self.harvester.block_start, min_extrinsic_block_id)
 
+        if self.harvester.block_end:
+            max_extrinsic_block_id = min(self.harvester.block_end, max_extrinsic_block_id)
+
         # Yield per 1000
         max_extrinsic_block_id = min(max_extrinsic_block_id, min_extrinsic_block_id + self.yield_per)
 
@@ -804,6 +836,9 @@ class ScaleDecode(Job):
         min_log_block_id = (self.session.query(func.max(CodecBlockHeaderDigestLog.block_number)).one()[0] or -1) + 1
 
         max_log_block_id = (self.session.query(func.max(NodeBlockHeaderDigestLog.block_number)).one()[0] or -1)
+
+        if self.harvester.block_end:
+            max_log_block_id = min(self.harvester.block_end, max_log_block_id)
 
         if self.harvester.block_start:
             min_log_block_id = max(self.harvester.block_start + 1, min_log_block_id)
@@ -839,6 +874,9 @@ class ScaleDecode(Job):
         max_storage_block_id = (self.session.query(func.max(NodeBlockStorage.block_number)).one()[0] or -1)
 
         max_storage_block_id = min(max_storage_block_id, min_storage_block_id + self.yield_per)
+
+        if self.harvester.block_end:
+            max_storage_block_id = min(self.harvester.block_end, max_storage_block_id)
 
         with GracefulInterruptHandler() as interrupt_handler:
 
@@ -1009,7 +1047,7 @@ class EventIndex(Job):
         if self.harvester.block_start:
             min_event_block = max(self.harvester.block_start, min_event_block)
 
-        if self.session.query(func.max(NodeBlockHeader.block_number)).one()[0] is None:
+        if self.session.query(func.max(CodecBlockEvent.block_number)).one()[0] is None:
             max_event_block = 0
         else:
             max_event_block = (self.session.query(func.max(CodecBlockEvent.block_number)).one()[0] or 0) + 1
