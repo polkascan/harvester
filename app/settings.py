@@ -53,6 +53,16 @@ if os.environ.get("INSTALLED_ETL_DATABASES"):
 else:
     INSTALLED_ETL_DATABASES = []
 
+if os.environ.get("BLOCK_START") is not None:
+    BLOCK_START = int(os.environ.get("BLOCK_START"))
+else:
+    BLOCK_START = None
+
+if os.environ.get("BLOCK_END") is not None:
+    BLOCK_END = int(os.environ.get("BLOCK_END"))
+else:
+    BLOCK_END = None
+
 try:
     from app.local_settings import *
 except ImportError:

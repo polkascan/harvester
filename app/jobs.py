@@ -28,7 +28,7 @@ from app.base import Job, GracefulInterruptHandler
 from app.exceptions import ShutdownException
 from app.models.codec import CodecBlockExtrinsic, CodecBlockHeaderDigestLog, CodecBlockStorage, CodecBlockEvent, \
     CodecMetadata, Runtime, RuntimePallet, RuntimeCall, RuntimeCallArgument, RuntimeEvent, RuntimeEventAttribute, \
-    RuntimeStorage, RuntimeConstant, RuntimeErrorMessage, RuntimeType
+    RuntimeStorage, RuntimeConstant, RuntimeErrorMessage, CodecEventIndexAccount
 from app.models.node import NodeBlockExtrinsic, NodeBlockStorage, HarvesterStatus, NodeBlockHeader, \
     NodeBlockHeaderDigestLog, NodeBlockRuntime, NodeRuntime, NodeMetadata, HarvesterStorageTask
 from scalecodec.base import ScaleDecoder, ScaleBytes
@@ -87,7 +87,7 @@ class Cron(Job):
         block_extrinsic = self.db_substrate.runtime_config.create_scale_object(
             "Extrinsic",
             data=ScaleBytes(node_block_extrinsic.length + node_block_extrinsic.data),
-            metadata=self.db_substrate.metadata_decoder
+            metadata=self.db_substrate.metadata
         )
         block_extrinsic.decode()
 
@@ -286,6 +286,12 @@ class RetrieveBlocks(Job):
         else:
             max_block_number = self.session.query(func.max(NodeBlockHeader.block_number)).one()[0] + 1
 
+        if self.harvester.block_start:
+            max_block_number = max(self.harvester.block_start, max_block_number)
+
+        if self.harvester.block_end:
+            finalised_block_number = min(self.harvester.block_end, finalised_block_number)
+
         gaps = [{'block_from': max_block_number, 'block_to': finalised_block_number}]
 
         with GracefulInterruptHandler() as interrupt_handler:
@@ -324,6 +330,9 @@ class RetrieveRuntimeState(Job):
             current_block_id = 0
         else:
             current_block_id = self.session.query(func.max(NodeBlockRuntime.block_number)).one()[0] + 1
+
+        if self.harvester.block_start:
+            current_block_id = max(self.harvester.block_start, current_block_id)
 
         with GracefulInterruptHandler() as interrupt_handler:
             item = self.session.query(NodeBlockHeader.hash, NodeBlockHeader.block_number).filter(
@@ -495,20 +504,20 @@ class RetrieveRuntimeState(Job):
                     )
 
                     # try:
-                    metadata_decoder = self.substrate.runtime_config.create_scale_object(
+                    metadata = self.substrate.runtime_config.create_scale_object(
                         "MetadataVersioned",
                         data=ScaleBytes(node_metadata.data)
                     )
-                    codec_metadata.data = metadata_decoder.decode()
+                    codec_metadata.data = metadata.decode()
                     codec_metadata.complete = True
 
-                    self.substrate.metadata_decoder = metadata_decoder
+                    self.substrate.metadata = metadata
 
                     if self.substrate.implements_scaleinfo():
                         self.substrate.reload_type_registry()
-                        self.substrate.runtime_config.add_portable_registry(metadata_decoder)
+                        self.substrate.runtime_config.add_portable_registry(metadata)
 
-                    self.store_runtime(metadata_decoder, node_runtime, block_hash)
+                    self.store_runtime(metadata, node_runtime, block_hash)
 
                     # except:
                     #     codec_metadata.complete = False
@@ -518,6 +527,11 @@ class RetrieveRuntimeState(Job):
     def store_runtime(self, metadata_decoder, runtime_info, block_hash):
         # Store metadata in database
         self.log(f'Store runtime {runtime_info.spec_name}-{runtime_info.spec_version}')
+
+        runtime = Runtime.query(self.session).get((runtime_info.spec_name, runtime_info.spec_version))
+
+        if runtime:
+            return
 
         runtime = Runtime(
             spec_name=runtime_info.spec_name,
@@ -530,7 +544,9 @@ class RetrieveRuntimeState(Job):
             count_pallets=len(metadata_decoder.pallets),
             count_storage_functions=0,
             count_constants=0,
-            count_errors=0
+            count_errors=0,
+            block_hash=runtime_info.block_hash,
+            block_number=runtime_info.block_number
         )
 
         runtime.save(self.session)
@@ -599,6 +615,16 @@ class RetrieveRuntimeState(Job):
                         else:
                             scale_type = arg.type
 
+                        scale_cls = self.substrate.runtime_config.get_decoder_class(arg.type)
+
+                        if scale_cls:
+                            try:
+                                scale_type_composition = scale_cls.generate_type_decomposition(max_recursion=4)
+                            except NotImplementedError:
+                                scale_type_composition = None
+                        else:
+                            scale_type_composition = None
+
                         runtime_call_arg = RuntimeCallArgument(
                             spec_name=runtime_module.spec_name,
                             spec_version=runtime_module.spec_version,
@@ -606,7 +632,8 @@ class RetrieveRuntimeState(Job):
                             call_name=call.name,
                             call_argument_idx=arg_idx,
                             name=arg.name,
-                            scale_type=scale_type
+                            scale_type=scale_type,
+                            scale_type_composition=scale_type_composition
                         )
                         runtime_call_arg.save(self.session)
 
@@ -636,13 +663,29 @@ class RetrieveRuntimeState(Job):
                         else:
                             scale_type = arg.type
 
+                        if type(arg.value) is dict and arg.value.get('name'):
+                            arg_name = arg.value.get('name')
+                        else:
+                            arg_name = str(arg_index)
+
+                        scale_cls = self.substrate.runtime_config.get_decoder_class(arg.type)
+
+                        if scale_cls:
+                            try:
+                                scale_type_composition = scale_cls.generate_type_decomposition(max_recursion=4)
+                            except NotImplementedError:
+                                scale_type_composition = None
+                        else:
+                            scale_type_composition = None
+
                         runtime_event_attr = RuntimeEventAttribute(
                             spec_name=runtime_module.spec_name,
                             spec_version=runtime_module.spec_version,
                             pallet=runtime_module.pallet,
                             event_name=event.name,
-                            event_attribute_idx=arg_index,
-                            scale_type=scale_type
+                            event_attribute_name=arg_name,
+                            scale_type=scale_type,
+                            scale_type_composition=scale_type_composition
                         )
                         runtime_event_attr.save(self.session)
 
@@ -712,6 +755,16 @@ class RetrieveRuntimeState(Job):
                     if type(value) is list or type(value) is dict:
                         value = json.dumps(value)
 
+                    scale_cls = self.substrate.runtime_config.get_decoder_class(constant.type)
+
+                    if scale_cls:
+                        try:
+                            scale_type_composition = scale_cls.generate_type_decomposition(max_recursion=4)
+                        except NotImplementedError:
+                            scale_type_composition = None
+                    else:
+                        scale_type_composition = None
+
                     runtime_constant = RuntimeConstant(
                         spec_name=runtime_module.spec_name,
                         spec_version=runtime_module.spec_version,
@@ -719,6 +772,7 @@ class RetrieveRuntimeState(Job):
                         pallet_constant_idx=idx,
                         constant_name=constant.name,
                         scale_type=constant.type,
+                        scale_type_composition=scale_type_composition,
                         value=value,
                         documentation='\n'.join(constant.docs)
                     )
@@ -739,18 +793,6 @@ class RetrieveRuntimeState(Job):
 
             runtime.save(self.session)
 
-        # Process types
-        for runtime_type_data in list(self.substrate.get_type_registry(block_hash=f'0x{block_hash.hex()}').values()):
-            runtime_type = RuntimeType(
-                spec_name=runtime_info.spec_name,
-                spec_version=runtime_info.spec_version,
-                scale_type=runtime_type_data["type_string"],
-                decoder_class=runtime_type_data["decoder_class"],
-                is_core_primitive=runtime_type_data["is_primitive_core"],
-                is_runtime_primitive=runtime_type_data["is_primitive_runtime"]
-            )
-            runtime_type.save(self.session)
-
 
 class ScaleDecode(Job):
 
@@ -761,6 +803,12 @@ class ScaleDecode(Job):
         min_extrinsic_block_id = (self.session.query(func.max(CodecBlockExtrinsic.block_number)).one()[0] or -1) + 1
 
         max_extrinsic_block_id = (self.session.query(func.max(NodeBlockExtrinsic.block_number)).one()[0] or -1)
+
+        if self.harvester.block_start:
+            min_extrinsic_block_id = max(self.harvester.block_start, min_extrinsic_block_id)
+
+        if self.harvester.block_end:
+            max_extrinsic_block_id = min(self.harvester.block_end, max_extrinsic_block_id)
 
         # Yield per 1000
         max_extrinsic_block_id = min(max_extrinsic_block_id, min_extrinsic_block_id + self.yield_per)
@@ -789,6 +837,12 @@ class ScaleDecode(Job):
 
         max_log_block_id = (self.session.query(func.max(NodeBlockHeaderDigestLog.block_number)).one()[0] or -1)
 
+        if self.harvester.block_end:
+            max_log_block_id = min(self.harvester.block_end, max_log_block_id)
+
+        if self.harvester.block_start:
+            min_log_block_id = max(self.harvester.block_start + 1, min_log_block_id)
+
         # Yield per 1000
         max_log_block_id = min(max_log_block_id, min_log_block_id + self.yield_per)
 
@@ -814,9 +868,15 @@ class ScaleDecode(Job):
         # Storage
         min_storage_block_id = (self.session.query(func.max(CodecBlockStorage.block_number)).one()[0] or -1) + 1
 
+        if self.harvester.block_start:
+            min_storage_block_id = max(self.harvester.block_start + 1, min_storage_block_id)
+
         max_storage_block_id = (self.session.query(func.max(NodeBlockStorage.block_number)).one()[0] or -1)
 
         max_storage_block_id = min(max_storage_block_id, min_storage_block_id + self.yield_per)
+
+        if self.harvester.block_end:
+            max_storage_block_id = min(self.harvester.block_end, max_storage_block_id)
 
         with GracefulInterruptHandler() as interrupt_handler:
 
@@ -854,7 +914,7 @@ class ScaleDecode(Job):
             scale_extrinsic = self.db_substrate.runtime_config.create_scale_object(
                 "Extrinsic",
                 data=ScaleBytes(node_block_extrinsic.length + node_block_extrinsic.data),
-                metadata=self.db_substrate.metadata_decoder
+                metadata=self.db_substrate.metadata
             )
             scale_extrinsic.decode()
 
@@ -888,7 +948,7 @@ class ScaleDecode(Job):
             scale_log_item = self.db_substrate.runtime_config.create_scale_object(
                 type_string='sp_runtime::generic::digest::DigestItem',
                 data=ScaleBytes(node_log_item.data),
-                metadata=self.db_substrate.metadata_decoder
+                metadata=self.db_substrate.metadata
             )
 
             log_item.data = scale_log_item.decode()
@@ -962,6 +1022,110 @@ class ScaleDecode(Job):
         self.session.commit()
 
 
+class EventIndex(Job):
+
+    icon = '🗄️'
+
+    def __init__(self, **kwargs):
+        self.account_event_catalog = {}
+        super().__init__(**kwargs)
+
+    def start(self):
+
+        record = HarvesterStatus.query(self.session).get('EVENT_INDEX_ACCOUNTID_MAX_BLOCKNUMBER')
+
+        if not record:
+            record = HarvesterStatus(
+                key='EVENT_INDEX_ACCOUNTID_MAX_BLOCKNUMBER',
+                description='Max blocknumber of event index accountid process'
+            )
+            record.save(self.session)
+
+        # Determine event range to process
+        min_event_block = (record.value or 0) + 1
+
+        if self.harvester.block_start:
+            min_event_block = max(self.harvester.block_start, min_event_block)
+
+        if self.session.query(func.max(CodecBlockEvent.block_number)).one()[0] is None:
+            max_event_block = 0
+        else:
+            max_event_block = (self.session.query(func.max(CodecBlockEvent.block_number)).one()[0] or 0) + 1
+
+        # Yield per 1000
+        max_event_block = min(max_event_block, min_event_block + self.yield_per)
+
+        with GracefulInterruptHandler() as interrupt_handler:
+
+            for current_block_id in range(min_event_block, max_event_block):
+
+                event_catalog = self.get_event_account_catalog(current_block_id)
+
+                index_added_count = 0
+
+                events = CodecBlockEvent.query(self.session).filter(
+                    CodecBlockEvent.block_number == current_block_id
+                )
+
+                for event in events:
+                    if type(event.data['attributes']) is dict:
+                        event_key = f'{event.event_module}.{event.event_name}'
+                        if event_key in event_catalog:
+                            for attr_name in event_catalog[event_key]:
+
+                                account_id = bytes.fromhex(event.data['attributes'][attr_name][2:])
+
+                                event_index = CodecEventIndexAccount(
+                                    block_number=event.block_number,
+                                    event_idx=event.event_idx,
+                                    account_id=account_id,
+                                    pallet=event.event_module,
+                                    event_name=event.event_name,
+                                    attribute_name=attr_name,
+                                    attributes=event.data['attributes'],
+                                    extrinsic_idx=event.data['extrinsic_idx']
+                                )
+                                event_index.save(self.session)
+                                index_added_count += 1
+
+                record.value = current_block_id
+                record.save(self.session)
+
+                if index_added_count > 0:
+                    self.log(f'Added {index_added_count} event account index records for #{current_block_id}')
+
+                self.session.commit()
+
+                if interrupt_handler.interrupted:
+                    self.log("🛑 Warm shutdown initiated", 1)
+                    raise ShutdownException()
+
+    def get_event_account_catalog(self, block_number):
+        runtime = NodeBlockRuntime.query(self.session).filter_by(block_number=block_number).one()
+        if runtime.spec_version not in self.account_event_catalog:
+
+            account_events = {}
+
+            event_attributes = RuntimeEventAttribute.query(self.session).filter_by(
+                spec_name=runtime.spec_name,
+                spec_version=runtime.spec_version,
+                scale_type='T::AccountId'
+            )
+
+            for event_attribute in event_attributes:
+
+                event_key = f'{event_attribute.pallet}.{event_attribute.event_name}'
+
+                if event_key not in account_events:
+                    account_events[event_key] = []
+
+                account_events[event_key].append(event_attribute.event_attribute_name)
+
+            self.account_event_catalog[runtime.spec_version] = account_events
+
+        return self.account_event_catalog[runtime.spec_version]
+
+
 class EtlProcess(Job):
 
     icon = '🧭'
@@ -980,6 +1144,9 @@ class EtlProcess(Job):
             start_blocknumber = 0
         else:
             start_blocknumber = (start_record.value or -1) + 1
+
+        if self.harvester.block_start:
+            start_blocknumber = max(self.harvester.block_start, start_blocknumber)
 
         end_blocknumber = min(end_record.value or 0, start_blocknumber + 999)
 

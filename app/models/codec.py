@@ -180,6 +180,25 @@ class CodecMetadata(BaseModel):
         )
 
 
+class CodecEventIndexAccount(BaseModel):
+    __tablename__ = 'codec_event_index_account'
+    __table_args__ = (Index('ix_codec_event_index_name_attr', "pallet", "event_name", "attribute_name"),)
+
+    block_number = sa.Column(sa.Integer(), primary_key=True, nullable=False)
+    event_idx = sa.Column(sa.Integer(), primary_key=True, nullable=False)
+    attribute_name = sa.Column(sa.String(64), primary_key=True, nullable=False)
+
+    account_id = sa.Column(sa.VARBINARY(33), nullable=False, index=True)
+    pallet = sa.Column(sa.String(255), nullable=False)
+    event_name = sa.Column(sa.String(255), nullable=False)
+
+    attributes = sa.Column(sa.JSON())
+    extrinsic_idx = sa.Column(sa.Integer(), nullable=True)
+
+    sort_value = sa.Column(sa.Integer(), nullable=True, index=True)
+    block_datetime = sa.Column(UTCDateTime(timezone=True), nullable=True, index=True)
+
+
 class Runtime(BaseModel):
     __tablename__ = 'runtime'
 
@@ -194,6 +213,8 @@ class Runtime(BaseModel):
     count_storage_functions = sa.Column(sa.Integer(), default=0, nullable=False)
     count_constants = sa.Column(sa.Integer(), nullable=False, server_default='0')
     count_errors = sa.Column(sa.Integer(), nullable=False, server_default='0')
+    block_hash = sa.Column(sa.types.BINARY(32), nullable=True)
+    block_number = sa.Column(sa.Integer(), nullable=True)
 
 
 class RuntimeCall(BaseModel):
@@ -219,6 +240,7 @@ class RuntimeCallArgument(BaseModel):
     call_argument_idx = sa.Column(sa.Integer(), primary_key=True, index=True)
     name = sa.Column(sa.String(255), index=True)
     scale_type = sa.Column(sa.String(512))
+    scale_type_composition = sa.Column(sa.JSON())
 
 
 class RuntimeConstant(BaseModel):
@@ -230,6 +252,7 @@ class RuntimeConstant(BaseModel):
     constant_name = sa.Column(sa.String(255), primary_key=True, index=True)
     pallet_constant_idx = sa.Column(sa.Integer(), nullable=False, index=True)
     scale_type = sa.Column(sa.String(512))
+    scale_type_composition = sa.Column(sa.JSON())
     value = sa.Column(sa.JSON())
     documentation = sa.Column(sa.Text())
 
@@ -266,8 +289,14 @@ class RuntimeEventAttribute(BaseModel):
     spec_version = sa.Column(sa.Integer(), nullable=False, primary_key=True, index=True)
     pallet = sa.Column(sa.String(255), nullable=False, primary_key=True, index=True)
     event_name = sa.Column(sa.String(255), primary_key=True, index=True)
-    event_attribute_idx = sa.Column(sa.Integer(), nullable=False, index=True, primary_key=True)
+    event_attribute_name = sa.Column(sa.String(64), nullable=False, index=True, primary_key=True)
     scale_type = sa.Column(sa.String(512))
+    scale_type_composition = sa.Column(sa.JSON())
+
+    def __repr__(self):
+        return "<{}(pallet={}, event_name={}, idx={})>".format(
+            self.__class__.__name__, self.pallet, self.event_name, self.event_attribute_idx
+        )
 
 
 class RuntimePallet(BaseModel):
@@ -305,13 +334,3 @@ class RuntimeStorage(BaseModel):
     is_linked = sa.Column(sa.Boolean())
     documentation = sa.Column(sa.Text())
 
-
-class RuntimeType(BaseModel):
-    __tablename__ = 'runtime_type'
-
-    spec_name = sa.Column(sa.String(255), nullable=False, primary_key=True, index=True)
-    spec_version = sa.Column(sa.Integer(), nullable=False, primary_key=True, index=True)
-    scale_type = sa.Column(sa.String(512), nullable=False, primary_key=True, index=True)
-    decoder_class = sa.Column(sa.String(255), nullable=True)
-    is_core_primitive = sa.Column(sa.Boolean())
-    is_runtime_primitive = sa.Column(sa.Boolean())
