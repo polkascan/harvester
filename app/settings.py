@@ -15,6 +15,7 @@
 #
 #  You should have received a copy of the GNU General Public License
 #  along with Polkascan. If not, see <http://www.gnu.org/licenses/>.
+import json
 import os
 
 DB_NAME = os.environ.get("DB_NAME", "polkascan")
@@ -42,6 +43,12 @@ SUBSTRATE_TREASURY_ACCOUNTS = [
 ]
 
 TYPE_REGISTRY = os.environ.get("TYPE_REGISTRY", None)
+
+if os.environ.get("CUSTOM_TYPE_REGISTRY") is not None:
+    CUSTOM_TYPE_REGISTRY = json.loads(os.environ.get("CUSTOM_TYPE_REGISTRY"))
+else:
+    CUSTOM_TYPE_REGISTRY = None
+
 
 DEBUG = bool(os.environ.get("DEBUG", False))
 
