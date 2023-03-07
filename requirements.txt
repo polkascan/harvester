@@ -1,4 +1,4 @@
-alembic~=1.8
+alembic~=1.8.0
 colored~=1.4.3
 click==8.1.3
 cryptography
