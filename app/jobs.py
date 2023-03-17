@@ -715,6 +715,14 @@ class RetrieveRuntimeState(Job):
                     else:
                         storage_default = None
 
+                    key_prefix_pallet = xxh128(module.value['storage']['prefix'].encode())
+                    if type(key_prefix_pallet) is str:
+                        key_prefix_pallet = bytes.fromhex(key_prefix_pallet)
+
+                    key_prefix_name = xxh128(xxh128(storage.name.encode()))
+                    if type(key_prefix_name) is str:
+                        key_prefix_name = bytes.fromhex(key_prefix_name)
+
                     runtime_storage = RuntimeStorage(
                         spec_name=runtime_module.spec_name,
                         spec_version=runtime_module.spec_version,
@@ -723,8 +731,8 @@ class RetrieveRuntimeState(Job):
                         storage_name=storage.name,
                         default=storage_default,
                         modifier=storage.value['modifier'],
-                        key_prefix_pallet=bytes.fromhex(xxh128(module.value['storage']['prefix'].encode())),
-                        key_prefix_name=bytes.fromhex(xxh128(storage.name.encode())),
+                        key_prefix_pallet=key_prefix_pallet,
+                        key_prefix_name=key_prefix_name,
                         key1_hasher=type_hasher,
                         key1_scale_type=type_key1,
                         key2_scale_type=type_key2,
