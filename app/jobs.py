@@ -1080,8 +1080,11 @@ class EventIndex(Job):
                 )
 
                 for event in events:
+                    if type(event.data['attributes']) is str:
+                        event.data['attributes'] = [event.data['attributes']]
                     if type(event.data['attributes']) is list:
                         event.data['attributes'] = {str(k): v for k, v in enumerate(event.data['attributes'])}
+
                     event_key = f'{event.event_module}.{event.event_name}'
                     if event_key in event_catalog:
                         for attr_name in event_catalog[event_key]:
