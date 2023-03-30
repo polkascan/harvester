@@ -36,7 +36,7 @@ def main():
 @click.option("--prometheus", is_flag=True, show_default=True, default=True, help="Expose Promotheus endpoint on port 9616")
 @click.option("--force-start", is_flag=True, show_default=True, default=False, help="Forces the harvester to start")
 @click.option('--type', 'type_', type=click.Choice(['archive', 'full', 'light'], case_sensitive=False), default='archive', show_default=True)
-@click.option('--job', type=click.Choice(['blocks', 'state', 'decode', 'cron', 'etl', 'all'], case_sensitive=False), default='all', show_default=True)
+@click.option('--job', type=click.Choice(['blocks', 'state', 'decode', 'cron', 'etl', 'event_index', 'all'], case_sensitive=False), default='all', show_default=True)
 @click.option('--block-start', type=int)
 @click.option('--block-end', type=int)
 def run(verbose, prometheus, type_, force_start, job, block_start, block_end):
