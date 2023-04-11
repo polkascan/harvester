@@ -157,7 +157,7 @@ class DatabaseSubstrateInterface(SubstrateInterface):
                     "id": self.request_id
                 }
 
-        elif method == 'chain_getRuntimeVersion':
+        elif method in ['chain_getRuntimeVersion', 'state_getRuntimeVersion']:
             block_runtime = NodeBlockRuntime.query(self.db_session).get(bytes.fromhex(params[0][2:]))
 
             if block_runtime:
